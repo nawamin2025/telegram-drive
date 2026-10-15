@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HEALAS Telegram Cloud Drive</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans">
+<div id="app" class="min-h-screen flex flex-col">
+    <!-- Navbar -->
+    <header class="bg-white border-b px-6 py-3 flex flex-wrap items-center justify-between gap-3 shadow-sm">
+        <div class="flex items-center space-x-3">
+            <i class="fa-brands fa-telegram text-blue-500 text-3xl"></i>
+            <span class="text-xl font-bold text-gray-700">HEALAS Drive</span>
+        </div>
+        <div class="flex-1 max-w-md">
+            <div class="relative">
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-gray-400"></i>
+                <input v-model="searchQuery" type="text" placeholder="ค้นหาไฟล์ในไดรฟ์..." 
+                       class="w-full pl-10 pr-4 py-2 bg-gray-100 rounded-full focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+            </div>
+        </div>
+        <div class="flex items-center space-x-2 text-sm">
+            <span v-if="chatId" class="bg-green-100 text-green-700 px-3 py-1.5 rounded-full font-medium">
+                <i class="fa-solid fa-check-circle"></i> เชื่อมต่อแล้ว ({{ chatId }})
+            </span>
+            <button v-if="chatId" @click="syncToTelegram" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-full font-medium transition" title="ส่งไฟล์สำรองสารบัญเข้าแชท">
+                <i class="fa-solid fa-cloud-arrow-up"></i> สำรองสารบัญ
+            </button>
+        </div>
+    </header>
+
+    <div class="flex flex-1 flex-col md:flex-row">
+        <!-- Sidebar -->
+        <aside class="w-full md:w-64 bg-white border-r p-4 flex flex-col space-y-3">
+            <label class="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-2xl shadow inline-flex items-center justify-center space-x-2 transition">
+                <i class="fa-solid fa-cloud-arrow-up"></i>
+                <span>อัปโหลดไฟล์</span>
+                <input type="file" class="hidden" @change="uploadFile" multiple>
+            </label>
+
+            <button @click="createFolder" class="bg-white border hover:bg-gray-50 text-gray-700 font-medium py-2.5 px-4 rounded-2xl shadow-sm inline-flex items-center justify-center space-x-2 transition">
+                <i class="fa-solid fa-folder-plus text-yellow-500"></i>
+                <span>สร้างโฟลเดอร์ใหม่</span>
+            </button>
+
+            <hr class="my-2">
+            <nav class="space-y-1">
+                <a href="#" @click.prevent="goToFolder(null, 'ไดรฟ์ของฉัน')" 
+                   :class="currentFolder === null ? 'bg-blue-50 text-blue-600 font-semibold' : 'text-gray-600 hover:bg-gray-100'"
+                   class="flex items-center space-x-3 px-4 py-2.5 rounded-xl">
+                    <i class="fa-solid fa-hard-drive"></i>
+                    <span>ไดรฟ์ของฉัน</span>
+                </a>
+            </nav>
+
+            <div class="mt-auto pt-6 border-t text-xs text-gray-400 space-y-2">
+                <p>💡 ไฟล์จริงถูกเก็บไว้ในแชทบอท Telegram ของคุณโดยตรง</p>
+                <button @click="resetSettings" class="text-red-400 hover:underline">ตั้งค่า Token / Chat ID ใหม่</button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 p-6">
+            <!-- กล่องเชื่อมต่อครั้งแรก -->
+            <div v-if="!chatId" class="mb-6 bg-amber-50 border border-amber-300 text-amber-900 p-5 rounded-2xl shadow-sm">
+                <h4 class="font-bold text-base mb-2"><i class="fa-solid fa-plug mr-1"></i> เชื่อมต่อกับ Telegram ครั้งแรก:</h4>
+                <ol class="list-decimal list-inside text-sm space-y-1 mb-4">
+                    <li>เปิดแอป Telegram ไปที่บอท <a href="https://t.me/nawamin_drive_bot" target="_blank" class="text-blue-600 underline font-bold">@nawamin_drive_bot</a></li>
+                    <li>กดปุ่ม <b>Start</b> (หรือพิมพ์คำว่า <code>สวัสดี</code> ส่งไป 1 ข้อความ)</li>
+                    <li>พอกดส่งแล้ว ให้คลิกปุ่มสีน้ำเงินด้านล่างนี้ครับ</li>
+                </ol>
+                <button @click="detectChatId" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl text-sm font-medium shadow">
+                    <i class="fa-solid fa-rotate mr-1"></i> ตรวจสอบการเชื่อมต่ออัตโนมัติ
+                </button>
+            </div>
+
+            <!-- Breadcrumb -->
+            <div class="flex items-center space-x-2 text-lg font-medium text-gray-700 mb-6">
+                <span class="cursor-pointer hover:underline" @click="goToFolder(null, 'ไดรฟ์ของฉัน')">ไดรฟ์ของฉัน</span>
+                <template v-if="currentFolder !== null">
+                    <i class="fa-solid fa-chevron-right text-xs text-gray-400"></i>
+                    <span class="text-blue-600">{{ currentFolderName }}</span>
+                </template>
+            </div>
+
+            <!-- Upload Progress -->
+            <div v-if="uploading" class="mb-6 bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-xl flex items-center space-x-3">
+                <i class="fa-solid fa-spinner fa-spin text-xl"></i>
+                <span>กำลังอัปโหลด <b>{{ uploadingName }}</b> ขึ้น Telegram Cloud...</span>
+            </div>
+
+            <!-- Folders Section -->
+            <div v-if="currentFolders.length > 0" class="mb-8">
+                <h3 class="text-sm font-medium text-gray-500 mb-3">โฟลเดอร์</h3>
+                <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                    <div v-for="folder in currentFolders" :key="folder.id" 
+                         @click="goToFolder(folder.id, folder.name)"
+                         class="bg-white border rounded-xl p-4 flex items-center justify-between hover:shadow-md cursor-pointer transition">
+                        <div class="flex items-center space-x-3 truncate">
+                            <i class="fa-solid fa-folder text-yellow-400 text-2xl"></i>
+                            <span class="truncate font-medium text-sm">{{ folder.name }}</span>
+                        </div>
+                        <button @click.stop="deleteFolder(folder.id)" class="text-gray-400 hover:text-red-500">
+                            <i class="fa-solid fa-trash-can text-xs"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Files Section -->
+            <div>
+                <h3 class="text-sm font-medium text-gray-500 mb-3">ไฟล์ทั้งหมด</h3>
+                <div v-if="filteredFiles.length === 0" class="text-center py-16 bg-white border border-dashed rounded-2xl text-gray-400">
+                    <i class="fa-regular fa-folder-open text-5xl mb-3"></i>
+                    <p>ยังไม่มีไฟล์ในโฟลเดอร์นี้ กดปุ่ม "อัปโหลดไฟล์" ด้านซ้ายได้เลย</p>
+                </div>
+
+                <div v-else class="bg-white border rounded-2xl overflow-hidden shadow-sm">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b bg-gray-50 text-gray-500 text-xs uppercase">
+                                <th class="py-3 px-4">ชื่อไฟล์</th>
+                                <th class="py-3 px-4">ขนาด</th>
+                                <th class="py-3 px-4">วันที่อัปโหลด</th>
+                                <th class="py-3 px-4 text-right">จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y text-sm">
+                            <tr v-for="file in filteredFiles" :key="file.id" class="hover:bg-gray-50">
+                                <td class="py-3 px-4 font-medium flex items-center space-x-3">
+                                    <i class="fa-regular fa-file-lines text-blue-500 text-lg"></i>
+                                    <span class="truncate max-w-xs md:max-w-md">{{ file.name }}</span>
+                                </td>
+                                <td class="py-3 px-4 text-gray-500">{{ formatSize(file.size) }}</td>
+                                <td class="py-3 px-4 text-gray-500">{{ file.date }}</td>
+                                <td class="py-3 px-4 text-right space-x-3">
+                                    <button @click="downloadFile(file)" class="text-blue-600 hover:underline font-medium">
+                                        <i class="fa-solid fa-download"></i> ดาวน์โหลด
+                                    </button>
+                                    <button @click="deleteFile(file)" class="text-red-500 hover:underline">
+                                        <i class="fa-solid fa-trash"></i> ลบ
+                                    </button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+</div>
+
+<script>
+const { createApp } = Vue
+
+createApp({
+    data() {
+        return {
+            botToken: localStorage.getItem('tg_bot_token') || '8626262755:AAFWBRgZOQi5W7e6XgqP3AxccWKjtPmVnsI',
+            chatId: localStorage.getItem('tg_chat_id') || '',
+            folders: JSON.parse(localStorage.getItem('tg_folders') || '[]'),
+            files: JSON.parse(localStorage.getItem('tg_files') || '[]'),
+            currentFolder: null,
+            currentFolderName: 'ไดรฟ์ของฉัน',
+            searchQuery: '',
+            uploading: false,
+            uploadingName: ''
+        }
+    },
+    computed: {
+        currentFolders() {
+            return this.folders.filter(f => f.parentId === this.currentFolder);
+        },
+        filteredFiles() {
+            let list = this.files.filter(f => f.folderId === this.currentFolder);
+            if (this.searchQuery) {
+                list = list.filter(f => f.name.toLowerCase().includes(this.searchQuery.toLowerCase()));
+            }
+            return list.slice().reverse();
+        }
+    },
+    mounted() {
+        if (!this.chatId) {
+            this.detectChatId(true);
+        }
+    },
+    methods: {
+        saveLocal() {
+            localStorage.setItem('tg_folders', JSON.stringify(this.folders));
+            localStorage.setItem('tg_files', JSON.stringify(this.files));
+        },
+        async detectChatId(silent = false) {
+            try {
+                const res = await fetch(`https://api.telegram.org/bot${this.botToken}/getUpdates`);
+                const data = await res.json();
+                if (data.ok && data.result.length > 0) {
+                    for (let i = data.result.length - 1; i >= 0; i--) {
+                        const msg = data.result[i].message || data.result[i].channel_post;
+                        if (msg && msg.chat) {
+                            this.chatId = String(msg.chat.id);
+                            localStorage.setItem('tg_chat_id', this.chatId);
+                            if (!silent) alert("✅ เชื่อมต่อกับ Telegram สำเร็จแล้ว!");
+                            return;
+                        }
+                    }
+                }
+                if (!silent) {
+                    const manual = prompt("ยังไม่พบข้อความที่ทักบอท กรุณาไปกด Start ที่ @nawamin_drive_bot ก่อน หรือกรอก Chat ID ด้วยตัวเอง:");
+                    if (manual) {
+                        this.chatId = manual.trim();
+                        localStorage.setItem('tg_chat_id', this.chatId);
+                    }
+                }
+            } catch (e) {
+                if (!silent) alert("เกิดข้อผิดพลาดในการเชื่อมต่อ");
+            }
+        },
+        goToFolder(id, name) {
+            this.currentFolder = id;
+            this.currentFolderName = name;
+        },
+        createFolder() {
+            const name = prompt("ตั้งชื่อโฟลเดอร์ใหม่:");
+            if (!name) return;
+            this.folders.push({
+                id: Date.now(),
+                name: name,
+                parentId: this.currentFolder
+            });
+            this.saveLocal();
+        },
+        deleteFolder(id) {
+            if (!confirm("ต้องการลบโฟลเดอร์นี้ใช่ไหม?")) return;
+            this.folders = this.folders.filter(f => f.id !== id);
+            this.saveLocal();
+        },
+        async uploadFile(event) {
+            if (!this.chatId) {
+                alert("กรุณากดปุ่มเชื่อมต่อกับบอท Telegram ก่อนอัปโหลดไฟล์ครับ");
+                return;
+            }
+            const selected = event.target.files;
+            if (!selected.length) return;
+
+            this.uploading = true;
+            for (let i = 0; i < selected.length; i++) {
+                const file = selected[i];
+                this.uploadingName = file.name;
+
+                const formData = new FormData();
+                formData.append('chat_id', this.chatId);
+                formData.append('document', file);
+                formData.append('caption', `📁 ${file.name} (โฟลเดอร์: ${this.currentFolderName})`);
+
+                try {
+                    const res = await fetch(`https://api.telegram.org/bot${this.botToken}/sendDocument`, {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await res.json();
+                    if (data.ok) {
+                        const msg = data.result;
+                        const doc = msg.document || msg.audio || msg.video || (msg.photo ? msg.photo[msg.photo.length - 1] : null);
+                        this.files.push({
+                            id: Date.now() + i,
+                            name: file.name,
+                            size: file.size,
+                            tgFileId: doc.file_id,
+                            tgMessageId: msg.message_id,
+                            folderId: this.currentFolder,
+                            date: new Date().toLocaleString('th-TH')
+                        });
+                        this.saveLocal();
+                    } else {
+                        alert(`อัปโหลด ${file.name} ไม่สำเร็จ: ` + data.description);
+                    }
+                } catch (err) {
+                    alert("เกิดข้อผิดพลาดในการส่งไฟล์ขึ้น Telegram");
+                }
+            }
+            this.uploading = false;
+            event.target.value = '';
+        },
+        async downloadFile(file) {
+            try {
+                const res = await fetch(`https://api.telegram.org/bot${this.botToken}/getFile?file_id=${file.tgFileId}`);
+                const data = await res.json();
+                if (data.ok) {
+                    const filePath = data.result.file_path;
+                    const downloadUrl = `https://api.telegram.org/file/bot${this.botToken}/${filePath}`;
+                    window.open(downloadUrl, '_blank');
+                } else {
+                    alert("ไม่สามารถดึงลิงก์ดาวน์โหลดได้: " + data.description);
+                }
+            } catch (e) {
+                alert("เกิดข้อผิดพลาดในการดาวน์โหลด");
+            }
+        },
+        async deleteFile(file) {
+            if (!confirm(`ต้องการลบไฟล์ "${file.name}" ออกจากไดรฟ์และ Telegram ใช่ไหม?`)) return;
+            try {
+                await fetch(`https://api.telegram.org/bot${this.botToken}/deleteMessage`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ chat_id: this.chatId, message_id: file.tgMessageId })
+                });
+            } catch (e) {}
+            this.files = this.files.filter(f => f.id !== file.id);
+            this.saveLocal();
+        },
+        async syncToTelegram() {
+            const backupData = JSON.stringify({ folders: this.folders, files: this.files }, null, 2);
+            const blob = new Blob([backupData], { type: 'application/json' });
+            const formData = new FormData();
+            formData.append('chat_id', this.chatId);
+            formData.append('document', blob, 'healas_drive_backup.json');
+            formData.append('caption', '🔄 ไฟล์สำรองข้อมูลสารบัญโฟลเดอร์และไฟล์ทั้งหมด');
+
+            await fetch(`https://api.telegram.org/bot${this.botToken}/sendDocument`, {
+                method: 'POST',
+                body: formData
+            });
+            alert("✅ ส่งไฟล์สำรองสารบัญเข้าแชท Telegram เรียบร้อยแล้ว!");
+        },
+        resetSettings() {
+            const newToken = prompt("ใส่ Bot Token ใหม่:", this.botToken);
+            if (newToken) {
+                this.botToken = newToken.trim();
+                localStorage.setItem('tg_bot_token', this.botToken);
+                localStorage.removeItem('tg_chat_id');
+                this.chatId = '';
+                this.detectChatId();
+            }
+        },
+        formatSize(bytes) {
+            if (!bytes) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+    }
+}).mount('#app')
+</script>
+</body>
+</html>
